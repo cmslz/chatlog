@@ -295,8 +295,9 @@ func (ds *DataSource) GetMessages(ctx context.Context, startTime, endTime time.T
 
 			// 应用keyword过滤
 			if regex != nil {
-				plainText := message.PlainTextContent()
-				if !regex.MatchString(plainText) {
+				// 直接搜索原始消息内容，而不是格式化后的内容
+				content := message.Content
+				if !regex.MatchString(content) {
 					continue // 不匹配keyword，跳过此消息
 				}
 			}

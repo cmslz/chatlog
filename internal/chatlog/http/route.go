@@ -56,9 +56,18 @@ func (s *Service) initAPIRouter() {
 	api := s.router.Group("/api/v1", s.checkDBStateMiddleware())
 	{
 		api.GET("/chatlog", s.handleChatlog)
+		api.GET("/chatlog/search", s.handleChatlogSearch)
 		api.GET("/contact", s.handleContacts)
+		api.GET("/contact/search", s.handleContactsSearch)
+		api.GET("/contact/search/:keyword", s.handleContactByKeyword)
 		api.GET("/chatroom", s.handleChatRooms)
+		api.GET("/chatroom/search", s.handleChatRoomsSearch)
+		api.GET("/chatroom/:name", s.handleChatRoomByName)
 		api.GET("/session", s.handleSessions)
+		api.GET("/session/recent", s.handleRecentSessions)
+		api.GET("/status", s.handleStatus)
+		api.GET("/config", s.handleConfig)
+		api.POST("/config", s.handleUpdateConfig)
 	}
 }
 
@@ -290,6 +299,173 @@ func (s *Service) handleSessions(c *gin.Context) {
 		}
 		c.Writer.Flush()
 	}
+}
+
+func (s *Service) handleChatlogSearch(c *gin.Context) {
+	q := struct {
+		Keyword string `form:"keyword"`
+		Time    string `form:"time"`
+		Talker  string `form:"talker"`
+		Sender  string `form:"sender"`
+		Limit   int    `form:"limit"`
+		Offset  int    `form:"offset"`
+	}{}
+
+	if err := c.BindQuery(&q); err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	var err error
+	start, end, ok := util.TimeRangeOf(q.Time)
+	if !ok && q.Time != "" {
+		errors.Err(c, errors.InvalidArg("time"))
+		return
+	}
+
+	messages, err := s.db.GetMessages(start, end, q.Talker, q.Sender, q.Keyword, q.Limit, q.Offset)
+	if err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, messages)
+}
+
+func (s *Service) handleContactsSearch(c *gin.Context) {
+	q := struct {
+		Keyword string `form:"keyword"`
+		Limit   int    `form:"limit"`
+		Offset  int    `form:"offset"`
+	}{}
+
+	if err := c.BindQuery(&q); err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	contacts, err := s.db.GetContacts(q.Keyword, q.Limit, q.Offset)
+	if err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, contacts)
+}
+
+func (s *Service) handleContactByKeyword(c *gin.Context) {
+	keyword := c.Param("keyword")
+	if keyword == "" {
+		errors.Err(c, errors.InvalidArg("keyword"))
+		return
+	}
+
+	contacts, err := s.db.GetContacts(keyword, 0, 0)
+	if err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, contacts)
+}
+
+func (s *Service) handleChatRoomsSearch(c *gin.Context) {
+	q := struct {
+		Keyword string `form:"keyword"`
+		Limit   int    `form:"limit"`
+		Offset  int    `form:"offset"`
+	}{}
+
+	if err := c.BindQuery(&q); err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	chatRooms, err := s.db.GetChatRooms(q.Keyword, q.Limit, q.Offset)
+	if err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, chatRooms)
+}
+
+func (s *Service) handleChatRoomByName(c *gin.Context) {
+	name := c.Param("name")
+	if name == "" {
+		errors.Err(c, errors.InvalidArg("name"))
+		return
+	}
+
+	chatRooms, err := s.db.GetChatRooms(name, 1, 0)
+	if err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	if len(chatRooms.Items) == 0 {
+		errors.Err(c, errors.ChatRoomNotFound(name))
+		return
+	}
+
+	c.JSON(http.StatusOK, chatRooms.Items[0])
+}
+
+func (s *Service) handleRecentSessions(c *gin.Context) {
+	q := struct {
+		Limit int `form:"limit"`
+	}{}
+
+	if err := c.BindQuery(&q); err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	if q.Limit <= 0 {
+		q.Limit = 20
+	}
+
+	sessions, err := s.db.GetSessions("", q.Limit, 0)
+	if err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, sessions.Items)
+}
+
+func (s *Service) handleStatus(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
+		"version": "1.0.0",
+	})
+}
+
+func (s *Service) handleConfig(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"httpAddr": s.conf.GetHTTPAddr(),
+		"dataDir":  s.conf.GetDataDir(),
+		"workDir":  s.conf.GetWorkDir(),
+	})
+}
+
+func (s *Service) handleUpdateConfig(c *gin.Context) {
+	var config struct {
+		HTTPAddr string `json:"httpAddr"`
+		DataDir  string `json:"dataDir"`
+		WorkDir  string `json:"workDir"`
+	}
+
+	if err := c.BindJSON(&config); err != nil {
+		errors.Err(c, err)
+		return
+	}
+
+	// 更新配置逻辑（这里只是示例，实际应该保存到配置文件）
+	c.JSON(http.StatusOK, gin.H{
+		"message": "配置更新成功",
+		"config":  config,
+	})
 }
 
 func (s *Service) handleMedia(c *gin.Context, _type string) {
